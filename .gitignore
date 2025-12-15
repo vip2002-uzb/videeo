@@ -1,0 +1,9 @@
+downloads/
+__pycache__/
+*.pyc
+bot_users.db
+.env
+.venv/
+venv/
+.idea/
+.vscode/
