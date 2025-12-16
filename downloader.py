@@ -55,8 +55,9 @@ async def download_video(url: str) -> str:
         return file_path
 
     except Exception as e:
+        error_msg = str(e)
         # Windowsda 'WinError 32' (fayl band) xatoligi bo'lsa, qo'lda to'g'irlashga harakat qilamiz
-        if "[WinError 32]" in str(e):
+        if "[WinError 32]" in error_msg:
             print(f"Windows fayl band xatoligi ushlandi, tuzatishga urinilmoqda...")
             await asyncio.sleep(2) # Antivirus yoki tizim faylni bo'shatishini kutamiz
             
@@ -72,5 +73,10 @@ async def download_video(url: str) -> str:
                 except Exception as rename_error:
                     print(f"Qayta nomlashda xatolik: {rename_error}")
 
+        if "Sign in to confirm" in error_msg:
+            print("Xatolik: YouTube cookies talab qilmoqda.")
+            raise Exception("YouTube bot ekanligimizni aniqladi. Iltimos, 'cookies.txt' faylini yangilang yoki qo'shing.")
+
         print(f"Yuklashda xatolik: {e}")
-        return None
+        # Xatoni chaqiruvchi funksiyaga qaytarish, shunda userga aniqroq xabar boradi
+        raise e

@@ -7,3 +7,5 @@ bot_users.db
 venv/
 .idea/
 .vscode/
+cookies.txt
+cookies.netscape.txt
