@@ -11,8 +11,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 from downloader import download_video
 
-# Logging ni yoqish
-logging.basicConfig(level=logging.INFO)
+# Logging ni yoqish (Render logs uchun stdout ga yozish)
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logging.getLogger().setLevel(logging.INFO)
+print("Bot ishga tushmoqda...", flush=True)
 
 # Bot tokenini shu yerga yozing yoki muhit o'zgaruvchisidan oling
 BOT_TOKEN = "8522116634:AAHZYnKtOnllhkhBfjWkuCSx-Zmd7Elhk00"
@@ -231,17 +238,31 @@ async def start_web_server():
     logging.info(f"Web server started on port {port}")
 
 async def main():
+    print("=" * 50, flush=True)
+    print("Bot ishga tushmoqda...", flush=True)
+    print("=" * 50, flush=True)
+    
     bot = Bot(token=BOT_TOKEN)
+    
     # Web serverni ishga tushirish (orqa fonda)
     await start_web_server()
+    print("Web server tayyor!", flush=True)
+    
+    print("Telegram polling boshlanmoqda...", flush=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import sys
+    print("Main.py ishga tushdi!", flush=True)
+    
     if BOT_TOKEN == "SIZNING_BOT_TOKENINGIZ_BU_YERDA":
         print("DIQQAT: Bot tokeni kiritilmagan! main.py faylida BOT_TOKEN ni o'zgartiring.")
+        sys.exit(1)
     
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        print("Bot to'xtatildi.")
+    except Exception as e:
+        print(f"XATOLIK: {e}", flush=True)
+        raise
+
