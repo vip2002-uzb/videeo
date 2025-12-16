@@ -38,6 +38,10 @@ async def download_video(url: str) -> str:
         },
     }
 
+    # Cookies fayli borligini tekshirish (yosh chegarasi yoki login talab qilinadigan videolar uchun)
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = "cookies.txt"
+
     try:
         # Asinxron muhitda bloklanmasligi uchun
         loop = asyncio.get_running_loop()

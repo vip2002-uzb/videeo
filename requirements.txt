@@ -1,4 +1,4 @@
 aiogram
-yt-dlp
+yt-dlp>=2025.12.08
 aiohttp
 imageio-ffmpeg
