@@ -167,25 +167,53 @@ async def download_handler(message: types.Message):
         await message.answer("Iltimos, to'g'ri havola yuboring.")
         return
 
-    status_msg = await message.answer("Video yuklanmoqda... Iltimos kuting.")
+    # Qaysi platform ekanligini aniqlash
+    platform_emoji = "📹"
+    if "youtube.com" in url.lower() or "youtu.be" in url.lower():
+        platform_emoji = "🔴 YouTube"
+    elif "instagram.com" in url.lower():
+        platform_emoji = "🟣 Instagram"
+    elif "tiktok.com" in url.lower():
+        platform_emoji = "🖤 TikTok"
+    elif "facebook.com" in url.lower() or "fb.watch" in url.lower():
+        platform_emoji = "🔵 Facebook"
+
+    status_msg = await message.answer(f"{platform_emoji} video yuklanmoqda... ⏳\nIltimos kuting, bu biroz vaqt olishi mumkin.")
 
     try:
         # Videoni yuklab olish
         video_path = await download_video(url)
         
         if video_path and os.path.exists(video_path):
-            await message.answer("Video topildi, yuklanmoqda...")
+            # Fayl hajmini tekshirish
+            file_size = os.path.getsize(video_path)
+            max_size = 50 * 1024 * 1024  # 50 MB (Telegram limiti)
+            
+            if file_size > max_size:
+                await status_msg.edit_text("⚠️ Video hajmi juda katta (50 MB dan ortiq). Telegram bu hajmni qo'llab-quvvatlamaydi.")
+                os.remove(video_path)
+                return
+            
+            await status_msg.edit_text("✅ Video topildi, jo'natilmoqda...")
             video_file = FSInputFile(video_path)
-            await message.answer_video(video_file, caption="Siz so'ragan video 📹")
+            await message.answer_video(video_file, caption=f"Siz so'ragan video 📹\n\n@video_downloader_botingiz_nomi")
             
             # Faylni o'chirib tashlash (joyni tejash uchun)
-            os.remove(video_path)
+            try:
+                os.remove(video_path)
+            except:
+                pass
             await status_msg.delete()
         else:
-            await status_msg.edit_text("Kechirasiz, videoni yuklab bo'lmadi. Havolani tekshirib ko'ring yoki botda xatolik yuz berdi.")
+            await status_msg.edit_text("❌ Kechirasiz, videoni yuklab bo'lmadi.\n\nSabablari:\n• Havola noto'g'ri\n• Video shaxsiy\n• Platforma muammosi")
             
     except Exception as e:
-        await status_msg.edit_text(f"Xatolik yuz berdi: {str(e)}")
+        error_text = str(e)
+        # Xatolik xabarini chiroyli qilish
+        if error_text.startswith("❌"):
+            await status_msg.edit_text(error_text)
+        else:
+            await status_msg.edit_text(f"❌ Xatolik yuz berdi:\n\n{error_text[:200]}")
 
 
 # Web server funksiyasi (Render uchun)
