@@ -4,12 +4,12 @@ import logging
 import sqlite3
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
-from downloader import download_video
+from downloader import download_video, download_audio
 
 # Logging ni yoqish (Render logs uchun stdout ga yozish)
 import sys
@@ -26,6 +26,12 @@ BOT_TOKEN = "8522116634:AAHZYnKtOnllhkhBfjWkuCSx-Zmd7Elhk00"
 # Adminlar ID ro'yxati (o'zingizning ID raqamingizni kiriting)
 # ID ni olish uchun @userinfobot ga yozishingiz mumkin
 ADMIN_IDS = [6040028347] 
+
+# Bot username (reklama uchun)
+BOT_USERNAME = "@UniversalDownloaduzb_bot"
+# Video/Audio caption (reklama matni)
+CAPTION_TEXT = "📹 Siz so'ragan video\n\n🤖 Bot: @UniversalDownloaduzb_bot\n👉 Obuna bo'ling!"
+AUDIO_CAPTION_TEXT = "🎵 Siz so'ragan audio\n\n🤖 Bot: @UniversalDownloaduzb_bot\n👉 Obuna bo'ling!"
 
 # Ma'lumotlar bazasini ulash
 def init_db():
@@ -61,6 +67,11 @@ def get_all_users():
 # Admin holatlari
 class AdminState(StatesGroup):
     broadcast_text = State()
+    reply_to_user = State()  # Foydalanuvchiga javob yozish
+
+# Foydalanuvchi holatlari (dasturchiga xabar yuborish)
+class UserState(StatesGroup):
+    waiting_for_message = State()
 
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -72,8 +83,7 @@ main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🟣 Instagram"), KeyboardButton(text="🖤 TikTok")],
         [KeyboardButton(text="🔴 YouTube"), KeyboardButton(text="🔵 Facebook")],
-        [KeyboardButton(text="ℹ️ Yordam"), KeyboardButton(text="👨‍💻 Dasturchi")],
-        [KeyboardButton(text="🏠 Bosh menyu")],
+        [KeyboardButton(text="👨‍💻 Dasturchi"), KeyboardButton(text="🏠 Bosh menyu")],
     ],
     resize_keyboard=True,
     input_field_placeholder="Linkni yuboring..."
@@ -107,16 +117,112 @@ async def youtube_handler(message: types.Message):
 async def facebook_handler(message: types.Message):
     await message.answer("Facebookdan video yuklash uchun menga video havolasini yuboring.")
 
-@dp.message(F.text == "ℹ️ Yordam")
-async def help_handler(message: types.Message):
-    text = ("🤖 **Botdan foydalanish:**\n\n"
-            "Instagram, TikTok, YouTube, Facebook yoki Threads dan video havolasini (link) nusxalab oling va menga yuboring.\n"
-            "Men videoni yuklab, sizga jo'nataman.")
-    await message.answer(text, parse_mode="Markdown", reply_markup=main_kb)
+
 
 @dp.message(F.text == "👨‍💻 Dasturchi")
-async def about_handler(message: types.Message):
-    await message.answer("Bu bot Universal Video Downloader.\nSavollar bo'lsa admin bilan bog'laning.", reply_markup=main_kb)
+async def about_handler(message: types.Message, state: FSMContext):
+    text = ("👨‍💻 **Dasturchi bilan bog'lanish**\n\n"
+            "Savolingiz yoki taklifingiz bo'lsa, pastga yozing.\n"
+            "Xabaringiz adminga yuboriladi.\n\n"
+            "❌ Bekor qilish uchun /cancel bosing.")
+    await message.answer(text, parse_mode="Markdown", reply_markup=types.ReplyKeyboardRemove())
+    await state.set_state(UserState.waiting_for_message)
+
+@dp.message(Command("cancel"))
+async def cancel_handler(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is None:
+        await message.answer("Hech narsa bekor qilinmadi.", reply_markup=main_kb)
+        return
+    await state.clear()
+    await message.answer("✅ Bekor qilindi.", reply_markup=main_kb)
+
+@dp.message(UserState.waiting_for_message)
+async def receive_user_message(message: types.Message, state: FSMContext):
+    user = message.from_user
+    user_info = f"👤 **Foydalanuvchi:** {user.full_name}\n"
+    user_info += f"🆔 **ID:** `{user.id}`\n"
+    if user.username:
+        user_info += f"📧 **Username:** @{user.username}\n"
+    user_info += f"\n💬 **Xabar:**\n{message.text}"
+    
+    # Javob berish tugmasi
+    reply_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Javob berish", callback_data=f"reply_{user.id}")]
+    ])
+    
+    # Adminga yuborish
+    sent_count = 0
+    for admin_id in ADMIN_IDS:
+        try:
+            await message.bot.send_message(
+                admin_id, 
+                f"📩 **Yangi xabar keldi!**\n\n{user_info}",
+                parse_mode="Markdown",
+                reply_markup=reply_kb
+            )
+            sent_count += 1
+        except Exception as e:
+            logging.error(f"Adminga xabar yuborishda xatolik ({admin_id}): {e}")
+    
+    if sent_count > 0:
+        await message.answer(
+            "✅ Xabaringiz adminga yuborildi!\n"
+            "Tez orada javob olasiz.",
+            reply_markup=main_kb
+        )
+    else:
+        await message.answer(
+            "❌ Xabar yuborishda xatolik yuz berdi.\n"
+            "Iltimos keyinroq urinib ko'ring.",
+            reply_markup=main_kb
+        )
+    
+    await state.clear()
+
+# Admin javob berish callback handleri
+@dp.callback_query(F.data.startswith("reply_"))
+async def reply_callback_handler(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Siz admin emassiz!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split("_")[1])
+    await state.update_data(reply_to_user_id=user_id)
+    await state.set_state(AdminState.reply_to_user)
+    
+    await callback.message.answer(
+        f"✍️ Foydalanuvchiga (ID: {user_id}) javob yozing:\n\n"
+        "❌ Bekor qilish uchun /cancel bosing."
+    )
+    await callback.answer()
+
+# Admin javob xabarini qabul qilish
+@dp.message(AdminState.reply_to_user)
+async def send_reply_to_user(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    
+    data = await state.get_data()
+    user_id = data.get("reply_to_user_id")
+    
+    if not user_id:
+        await message.answer("❌ Xatolik: Foydalanuvchi topilmadi.", reply_markup=admin_kb)
+        await state.clear()
+        return
+    
+    try:
+        await message.bot.send_message(
+            user_id,
+            f"💬 **Admin javobi:**\n\n{message.text}",
+            parse_mode="Markdown"
+        )
+        await message.answer(f"✅ Javob foydalanuvchiga (ID: {user_id}) yuborildi!", reply_markup=admin_kb)
+    except Exception as e:
+        logging.error(f"Javob yuborishda xatolik: {e}")
+        await message.answer(f"❌ Javob yuborishda xatolik: {e}", reply_markup=admin_kb)
+    
+    await state.clear()
 
 # --- Admin Panel Logic ---
 
@@ -175,52 +281,135 @@ async def download_handler(message: types.Message):
         return
 
     # Qaysi platform ekanligini aniqlash
-    platform_emoji = "📹"
+    platform_name = "📹 Video"
     if "youtube.com" in url.lower() or "youtu.be" in url.lower():
-        platform_emoji = "🔴 YouTube"
+        platform_name = "🔴 YouTube"
     elif "instagram.com" in url.lower():
-        platform_emoji = "🟣 Instagram"
+        platform_name = "🟣 Instagram"
     elif "tiktok.com" in url.lower():
-        platform_emoji = "🖤 TikTok"
+        platform_name = "🖤 TikTok"
     elif "facebook.com" in url.lower() or "fb.watch" in url.lower():
-        platform_emoji = "🔵 Facebook"
+        platform_name = "🔵 Facebook"
 
-    status_msg = await message.answer(f"{platform_emoji} video yuklanmoqda... ⏳\nIltimos kuting, bu biroz vaqt olishi mumkin.")
+    # Video/Audio tanlash tugmalari
+    # URL ni callback_data ga qo'shish (64 baytgacha limit)
+    # Shuning uchun URL ni hash qilamiz
+    import hashlib
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
+    
+    # URL ni vaqtincha saqlash (global dict)
+    if not hasattr(download_handler, 'url_cache'):
+        download_handler.url_cache = {}
+    download_handler.url_cache[url_hash] = url
+    
+    choice_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎬 Video", callback_data=f"dl_video_{url_hash}"),
+            InlineKeyboardButton(text="🎵 Audio (MP3)", callback_data=f"dl_audio_{url_hash}")
+        ]
+    ])
+    
+    await message.answer(
+        f"{platform_name} aniqlandi!\n\n"
+        "Qanday formatda yuklab olmoqchisiz?",
+        reply_markup=choice_kb
+    )
 
+
+# Video yuklash callback
+@dp.callback_query(F.data.startswith("dl_video_"))
+async def download_video_callback(callback: CallbackQuery):
+    url_hash = callback.data.replace("dl_video_", "")
+    
+    # URL ni olish
+    if not hasattr(download_handler, 'url_cache') or url_hash not in download_handler.url_cache:
+        await callback.answer("❌ Havola topilmadi. Qaytadan yuboring.", show_alert=True)
+        return
+    
+    url = download_handler.url_cache[url_hash]
+    await callback.answer("Video yuklanmoqda...")
+    
+    # Xabarni yangilash
+    await callback.message.edit_text("🎬 Video yuklanmoqda... ⏳\nIltimos kuting, bu biroz vaqt olishi mumkin.")
+    
     try:
-        # Videoni yuklab olish
         video_path = await download_video(url)
         
         if video_path and os.path.exists(video_path):
-            # Fayl hajmini tekshirish
             file_size = os.path.getsize(video_path)
-            max_size = 50 * 1024 * 1024  # 50 MB (Telegram limiti)
+            file_size_mb = file_size / (1024 * 1024)
+            max_size = 50 * 1024 * 1024
             
             if file_size > max_size:
-                await status_msg.edit_text("⚠️ Video hajmi juda katta (50 MB dan ortiq). Telegram bu hajmni qo'llab-quvvatlamaydi.")
+                await callback.message.edit_text(
+                    f"⚠️ Video hajmi juda katta ({file_size_mb:.1f} MB).\n\n"
+                    "Telegram botlari 50 MB gacha fayl yuborishi mumkin.\n"
+                    "Iltimos, qisqaroq video tanlang."
+                )
                 os.remove(video_path)
                 return
             
-            await status_msg.edit_text("✅ Video topildi, jo'natilmoqda...")
+            await callback.message.edit_text(f"✅ Video topildi ({file_size_mb:.1f} MB), jo'natilmoqda...")
             video_file = FSInputFile(video_path)
-            await message.answer_video(video_file, caption=f"Siz so'ragan video 📹\n\n@video_downloader_botingiz_nomi")
+            await callback.message.answer_video(video_file, caption=CAPTION_TEXT)
             
-            # Faylni o'chirib tashlash (joyni tejash uchun)
             try:
                 os.remove(video_path)
             except:
                 pass
-            await status_msg.delete()
+            await callback.message.delete()
         else:
-            await status_msg.edit_text("❌ Kechirasiz, videoni yuklab bo'lmadi.\n\nSabablari:\n• Havola noto'g'ri\n• Video shaxsiy\n• Platforma muammosi")
+            await callback.message.edit_text("❌ Videoni yuklab bo'lmadi.")
             
     except Exception as e:
         error_text = str(e)
-        # Xatolik xabarini chiroyli qilish
         if error_text.startswith("❌"):
-            await status_msg.edit_text(error_text)
+            await callback.message.edit_text(error_text)
         else:
-            await status_msg.edit_text(f"❌ Xatolik yuz berdi:\n\n{error_text[:200]}")
+            await callback.message.edit_text(f"❌ Xatolik: {error_text[:150]}")
+
+
+# Audio yuklash callback
+@dp.callback_query(F.data.startswith("dl_audio_"))
+async def download_audio_callback(callback: CallbackQuery):
+    url_hash = callback.data.replace("dl_audio_", "")
+    
+    # URL ni olish
+    if not hasattr(download_handler, 'url_cache') or url_hash not in download_handler.url_cache:
+        await callback.answer("❌ Havola topilmadi. Qaytadan yuboring.", show_alert=True)
+        return
+    
+    url = download_handler.url_cache[url_hash]
+    await callback.answer("Audio yuklanmoqda...")
+    
+    # Xabarni yangilash
+    await callback.message.edit_text("🎵 Audio (MP3) yuklanmoqda... ⏳\nIltimos kuting.")
+    
+    try:
+        audio_path = await download_audio(url)
+        
+        if audio_path and os.path.exists(audio_path):
+            file_size = os.path.getsize(audio_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            await callback.message.edit_text(f"✅ Audio topildi ({file_size_mb:.1f} MB), jo'natilmoqda...")
+            audio_file = FSInputFile(audio_path)
+            await callback.message.answer_audio(audio_file, caption=AUDIO_CAPTION_TEXT)
+            
+            try:
+                os.remove(audio_path)
+            except:
+                pass
+            await callback.message.delete()
+        else:
+            await callback.message.edit_text("❌ Audioni yuklab bo'lmadi.")
+            
+    except Exception as e:
+        error_text = str(e)
+        if error_text.startswith("❌"):
+            await callback.message.edit_text(error_text)
+        else:
+            await callback.message.edit_text(f"❌ Xatolik: {error_text[:150]}")
 
 
 # Web server funksiyasi (Render uchun)

@@ -79,22 +79,11 @@ async def download_video(url: str) -> str:
     if platform == "youtube":
         ydl_opts = {
             **base_opts,
-            # YouTube uchun 720p gacha sifat (tezroq va ishonchliroq)
-            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            # YouTube uchun 480p (50MB limitiga sig'ishi uchun)
+            # Agar 480p bo'lmasa, eng yaqin past sifatni oladi
+            'format': 'best[height<=480][ext=mp4]/best[height<=480]/best[height<=720][ext=mp4]/best[height<=720]/best',
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
-            },
-            # Age restriction (yosh chegarasi) bilan videolar uchun
-            'age_limit': 25,
-            # YouTube'ning bot tekshiruvini chetlab o'tish
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web'],
-                    'player_skip': ['webpage', 'configs'],
-                }
             },
         }
     elif platform == "instagram":
@@ -214,4 +203,85 @@ async def download_video(url: str) -> str:
             if os.path.exists(final_path):
                 return final_path
         
+        raise e
+
+
+async def download_audio(url: str) -> str:
+    """
+    Berilgan havoladan faqat audio (MP3) yuklab oladi.
+    """
+    url = clean_url(url)
+    platform = get_platform(url)
+    logger.info(f"Audio yuklanmoqda - Platform: {platform}, URL: {url}")
+    
+    output_filename = f"downloads/{uuid.uuid4()}"
+    
+    if not os.path.exists("downloads"):
+        os.makedirs("downloads")
+
+    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f'{output_filename}.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'ffmpeg_location': ffmpeg_path,
+        # MP3 ga o'zgartirish
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+    }
+    
+    # Cookies fayli mavjud bo'lsa
+    if os.path.exists('cookies.txt'):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+
+    try:
+        loop = asyncio.get_running_loop()
+        
+        def run_download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info(f"Audio yuklab olinmoqda: {url}")
+                info = ydl.extract_info(url, download=True)
+                # MP3 fayl nomi
+                base_path = ydl.prepare_filename(info)
+                # Kengaytmani .mp3 ga o'zgartirish
+                mp3_path = os.path.splitext(base_path)[0] + '.mp3'
+                logger.info(f"Audio muvaffaqiyatli yuklandi: {mp3_path}")
+                return mp3_path
+
+        file_path = await loop.run_in_executor(None, run_download)
+        
+        if file_path and os.path.exists(file_path):
+            return file_path
+        
+        # Fallback - .mp3 fayl qidirish
+        mp3_fallback = f"{output_filename}.mp3"
+        if os.path.exists(mp3_fallback):
+            return mp3_fallback
+            
+        raise Exception("Audio fayli yuklanmadi")
+
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        logger.error(f"yt-dlp audio xatolik: {error_msg}")
+        
+        if "Sign in to confirm" in error_msg:
+            raise Exception("❌ Bu audio yosh chegarasi bilan himoyalangan.")
+        elif "Private video" in error_msg:
+            raise Exception("❌ Bu video shaxsiy (private).")
+        elif "Video unavailable" in error_msg:
+            raise Exception("❌ Bu video mavjud emas yoki o'chirilgan.")
+        else:
+            raise Exception(f"❌ Audio yuklab bo'lmadi: {error_msg[:100]}")
+            
+    except Exception as e:
+        logger.error(f"Audio yuklashda xatolik: {e}")
         raise e
